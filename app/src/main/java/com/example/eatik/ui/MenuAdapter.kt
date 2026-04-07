@@ -7,10 +7,11 @@ import com.bumptech.glide.Glide
 import com.example.eatik.R
 import com.example.eatik.data.remote.response.MenuResponseItem
 import com.example.eatik.databinding.ItemMenuBinding
+import com.example.eatik.data.remote.retrofit.ApiConfig
 
 class MenuAdapter(
     private val listMenu: List<MenuResponseItem>,
-    private val onEditClick: (MenuResponseItem) -> Unit,
+    private val onItemClick: (MenuResponseItem) -> Unit,
 ) : RecyclerView.Adapter<MenuAdapter.MenuViewHolder>() {
 
     inner class MenuViewHolder(val binding: ItemMenuBinding) :
@@ -36,12 +37,17 @@ class MenuAdapter(
                 tvStatus.setTextColor(root.context.getColor(android.R.color.holo_red_dark))
             }
 
-            // LOAD GAMBAR DARI PUSAT IP (ApiConfig)
             Glide.with(root.context)
                 .load("http://192.168.0.238:8080/uploads/${item.foto}")
+                .load(ApiConfig.BASE_URL_IMAGE + item.foto)
                 .placeholder(R.drawable.ic_profile)
                 .error(R.drawable.ic_profile)
+                .centerCrop()
                 .into(ivMenu)
+
+            root.setOnClickListener {
+                onItemClick(item)
+            }
         }
     }
     override fun getItemCount(): Int = listMenu.size
