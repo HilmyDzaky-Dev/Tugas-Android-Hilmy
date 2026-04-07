@@ -1,11 +1,11 @@
-package com.example.eatik.retrofit
+package com.example.eatik.data.remote.retrofit
 
+import com.example.eatik.data.remote.retrofit.ApiService
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
-
 
 class ApiConfig {
     companion object{

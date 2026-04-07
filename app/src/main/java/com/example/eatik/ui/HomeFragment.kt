@@ -1,6 +1,8 @@
 package com.example.eatik.ui
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -17,25 +19,30 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.bumptech.glide.Glide
 import com.example.eatik.R
-import com.example.eatik.data.MenuResponseItem
+import com.example.eatik.data.Result
+import com.example.eatik.data.remote.response.MenuResponseItem
 import com.example.eatik.databinding.DialogEditMenuBinding
 import com.example.eatik.databinding.FragmentHomeBinding
-import com.example.eatik.retrofit.ApiConfig
+import com.example.eatik.data.remote.retrofit.ApiConfig
+import com.example.eatik.utils.Event
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
-import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 
 class HomeFragment : Fragment(R.layout.fragment_home) {
 
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
 
-    private val viewModel: MainViewModel by activityViewModels()
+    private val viewModel: MainViewModel by activityViewModels {
+        ViewModelFactory.getInstance(requireContext())
+    }
     private lateinit var menuAdapter: MenuAdapter
     private val listMenu = mutableListOf<MenuResponseItem>()
 
@@ -53,8 +60,10 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     private val launcherGallery = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let {
             selectedImageUri = it
-            _dialogBinding?.ivEditFoto?.setImageURI(it)
-            _dialogBinding?.layoutPlaceholder?.visibility = View.GONE
+            _dialogBinding?.let { binding ->
+                binding.ivEditFoto.setImageURI(it)
+                binding.layoutPlaceholder.visibility = View.GONE
+            }
         }
     }
 
@@ -69,8 +78,6 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
         binding.fabAddMenu.setOnClickListener {
             showMenuDialog(null, isEdit = false)
         }
-
-        viewModel.getMenu()
     }
 
     private fun setupSlider() {
@@ -90,11 +97,22 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     }
 
     private fun observeViewModel() {
-        viewModel.listMenu.observe(viewLifecycleOwner) { menuList ->
-            listMenu.clear()
-            listMenu.addAll(menuList)
-            menuAdapter.notifyDataSetChanged()
-            // Bagian load ivPicture dihapus karena sudah diganti ViewPager2 (vpSlider)
+        viewModel.menuResult.observe(viewLifecycleOwner) { result ->
+            when (result) {
+                is Result.Loading -> {
+                    binding.progressBar.visibility = View.VISIBLE
+                }
+                is Result.Success -> {
+                    binding.progressBar.visibility = View.GONE
+                    listMenu.clear()
+                    listMenu.addAll(result.data)
+                    menuAdapter.notifyDataSetChanged()
+                }
+                is Result.Error -> {
+                    binding.progressBar.visibility = View.GONE
+                    Toast.makeText(requireContext(), result.error, Toast.LENGTH_SHORT).show()
+                }
+            }
         }
 
         viewModel.snackbarText.observe(viewLifecycleOwner) { event ->
@@ -131,73 +149,97 @@ class HomeFragment : Fragment(R.layout.fragment_home) {
     }
 
     private fun showMenuDialog(item: MenuResponseItem?, isEdit: Boolean) {
-        _dialogBinding = DialogEditMenuBinding.inflate(layoutInflater)
+        val dialogBinding = DialogEditMenuBinding.inflate(layoutInflater)
+        _dialogBinding = dialogBinding
+
         selectedImageUri = null
-        _dialogBinding?.apply {
+
+        dialogBinding.apply {
             if (isEdit && item != null) {
                 etEditNama.setText(item.nama)
                 etEditHarga.setText(item.harga.toString())
                 etEditDeskripsi.setText(item.deskripsi)
                 etEditKategori.setText(item.kategori, false)
                 etEditStatus.setText(item.status, false)
-                Glide.with(requireContext()).load(ApiConfig.BASE_URL_IMAGE + item.foto).into(ivEditFoto)
+
+                Glide.with(requireContext())
+                    .load(ApiConfig.BASE_URL_IMAGE + item.foto)
+                    .placeholder(R.drawable.ic_profile)
+                    .into(ivEditFoto)
+
                 layoutPlaceholder.visibility = View.GONE
             }
+
             val categories = arrayOf("MAKANAN", "MINUMAN")
             val statuses = arrayOf("TERSEDIA", "HABIS")
             etEditKategori.setAdapter(ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, categories))
             etEditStatus.setAdapter(ArrayAdapter(requireContext(), android.R.layout.simple_list_item_1, statuses))
+
             btnPilihFoto.setOnClickListener { launcherGallery.launch("image/*") }
         }
 
-        val dialog = MaterialAlertDialogBuilder(requireContext()).setView(_dialogBinding?.root).setCancelable(false).create()
+        val dialog = MaterialAlertDialogBuilder(requireContext())
+            .setView(dialogBinding.root)
+            .setCancelable(false)
+            .create()
         dialog.show()
 
-        _dialogBinding?.btnDialogSimpan?.setOnClickListener {
-            val nama = _dialogBinding?.etEditNama?.text.toString().trim()
-            val harga = _dialogBinding?.etEditHarga?.text.toString().trim()
-            val deskripsi = _dialogBinding?.etEditDeskripsi?.text.toString().trim()
-            val kategori = _dialogBinding?.etEditKategori?.text.toString().trim()
-            val status = _dialogBinding?.etEditStatus?.text.toString().trim()
+        dialogBinding.btnDialogSimpan.setOnClickListener {
+            val nama = dialogBinding.etEditNama.text.toString().trim()
+            val harga = dialogBinding.etEditHarga.text.toString().trim()
+            val deskripsi = dialogBinding.etEditDeskripsi.text.toString().trim()
+            val kategori = dialogBinding.etEditKategori.text.toString().trim()
+            val status = dialogBinding.etEditStatus.text.toString().trim()
 
-            if (nama.isEmpty() || harga.isEmpty()) {
-                Toast.makeText(requireContext(), "Nama dan Harga wajib diisi!", Toast.LENGTH_SHORT).show()
+            if (nama.isEmpty() || harga.isEmpty() || kategori.isEmpty() || status.isEmpty()) {
+                Toast.makeText(requireContext(), "Harap isi semua data wajib!", Toast.LENGTH_SHORT).show()
             } else {
-                saveMenu(item?.id, nama, harga, deskripsi, kategori, status, isEdit, dialog)
+                saveMenuData(item?.id, nama, harga, deskripsi, kategori, status, isEdit, dialog)
             }
         }
-        _dialogBinding?.btnDialogBatal?.setOnClickListener { dialog.dismiss() }
+        dialogBinding.btnDialogBatal.setOnClickListener { dialog.dismiss() }
     }
 
-    private fun saveMenu(id: Int?, nama: String, harga: String, deskripsi: String, kategori: String, status: String, isEdit: Boolean, dialog: androidx.appcompat.app.AlertDialog) {
-        val idBody = if (isEdit && id != null) id.toString().toPart() else null
-        val namaBody = nama.toPart()
-        val hargaBody = harga.toPart()
-        val deskripsiBody = deskripsi.toPart()
-        val kategoriBody = kategori.toPart()
-        val statusBody = status.toPart()
+    private fun saveMenuData(id: Int?, nama: String, harga: String, deskripsi: String, kategori: String, status: String, isEdit: Boolean, dialog: androidx.appcompat.app.AlertDialog) {
+        val namaBody = nama.toRequestBody("text/plain".toMediaTypeOrNull())
+        val hargaBody = harga.toRequestBody("text/plain".toMediaTypeOrNull())
+        val deskripsiBody = deskripsi.toRequestBody("text/plain".toMediaTypeOrNull())
+        val kategoriBody = kategori.toRequestBody("text/plain".toMediaTypeOrNull())
+        val statusBody = status.toRequestBody("text/plain".toMediaTypeOrNull())
 
         var imagePart: MultipartBody.Part? = null
-        if (selectedImageUri != null) {
-            val file = uriToFile(selectedImageUri!!, requireContext())
-            val requestFile = file.asRequestBody("image/*".toMediaTypeOrNull())
+        selectedImageUri?.let { uri ->
+            val file = uriToFile(uri, requireContext())
+            val requestFile = file.asRequestBody("image/jpeg".toMediaTypeOrNull())
             imagePart = MultipartBody.Part.createFormData("foto", file.name, requestFile)
-        } else if (!isEdit) {
+        }
+
+        if (!isEdit && imagePart == null) {
             Toast.makeText(requireContext(), "Pilih foto dulu!", Toast.LENGTH_SHORT).show()
             return
         }
-        viewModel.saveMenu(idBody, namaBody, hargaBody, deskripsiBody, kategoriBody, statusBody, imagePart)
+
+        viewModel.saveMenu(if (isEdit) id else null, namaBody, hargaBody, deskripsiBody, kategoriBody, statusBody, imagePart)
         dialog.dismiss()
     }
 
-    private fun String.toPart(): RequestBody = this.toRequestBody("text/plain".toMediaTypeOrNull())
-
     private fun uriToFile(selectedImg: Uri, context: Context): File {
-        val file = File.createTempFile("temp_img", ".jpg", context.cacheDir)
-        context.contentResolver.openInputStream(selectedImg)?.use { input ->
-            FileOutputStream(file).use { output -> input.copyTo(output) }
-        }
-        return file
+        val contentResolver = context.contentResolver
+        val myFile = File.createTempFile("temp_image", ".jpg", context.cacheDir)
+        val inputStream = contentResolver.openInputStream(selectedImg) as InputStream
+        
+
+        val bitmap = BitmapFactory.decodeStream(inputStream)
+        val out = ByteArrayOutputStream()
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 50, out)
+        
+        val fos = FileOutputStream(myFile)
+        fos.write(out.toByteArray())
+        fos.flush()
+        fos.close()
+        inputStream.close()
+        
+        return myFile
     }
 
     override fun onPause() {

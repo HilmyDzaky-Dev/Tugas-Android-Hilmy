@@ -5,9 +5,8 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
 import com.bumptech.glide.Glide
 import com.example.eatik.R
-import com.example.eatik.data.MenuResponseItem
+import com.example.eatik.data.remote.response.MenuResponseItem
 import com.example.eatik.databinding.ItemMenuBinding
-import com.example.eatik.retrofit.ApiConfig
 
 class MenuAdapter(
     private val listMenu: List<MenuResponseItem>,
